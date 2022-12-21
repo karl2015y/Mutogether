@@ -51,7 +51,7 @@ export function getYoutubeVideo(serverArray:string[],videoId:string){
     return new Promise<Video>(async (resolve, reject) => {
         try {
             // const apiUrl = `${getRandItemFromArray(serverArray)}/api/v1/videos/${encodeURI(videoId)}/?fields=videoId,title,videoId,videoThumbnails,description,published,publishedText,keywords,likeCount,viewCount,author,authorThumbnails,formatStreams,recommendedVideos`
-            const apiUrl = `${getRandItemFromArray(serverArray)}/api/v1/videos/${encodeURI(videoId)}/?fields=videoId,title,videoId,videoThumbnails,description,published,publishedText,keywords,likeCount,viewCount,author,authorThumbnails,adaptiveFormats,recommendedVideos`
+            const apiUrl = `${getRandItemFromArray(serverArray)}/api/v1/videos/${encodeURI(videoId)}/?fields=videoId,title,videoId,videoThumbnails,description,published,publishedText,keywords,likeCount,viewCount,author,authorThumbnails,adaptiveFormats,recommendedVideos,lengthSeconds,formatStreams`
             const searchedArray = await getJson<Video>(apiUrl)
             resolve(searchedArray)
         } catch (error) {

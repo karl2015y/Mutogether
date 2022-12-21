@@ -1,44 +1,44 @@
 <template>
-    <div>
+    <div v-if="currentYoutubeInfo && currentYoutubeSources">
         <!-- {{currentYoutubeInfoIsLoading}} -->
         {{ currentYoutubeInfo?.title }}
         <br>
         {{ currentYoutubeInfo?.author }}
         <br>
         <player-panel
+            ref="playerPanelElement"
+            @ready="handleReady"
+            @prev="handlePrev"
             @next="handleNext"
-            :url="get(currentYoutubeInfo, 'adaptiveFormats[0].url', '')"
+            :urls="currentYoutubeSources"
         ></player-panel>
+        <!-- :url="`${get(currentYoutubeInfo, 'formatStreams[0].url')}`" -->
+
 
     </div>
 </template>
 
-<script setup lang="ts">import { computedAsync } from '@vueuse/core';
-import { first, get } from 'lodash';
-import { computed } from 'vue';
+<script setup lang="ts">
+import playerPanel from './player-panel.vue';
+import createRoomBtnVue from './create-room-btn.vue';
+import { computedAsync } from '@vueuse/core';
+import { find, first, get, toNumber, sample } from 'lodash';
+import { computed, ref, watch } from 'vue';
+import { useRoute } from 'vue-router';
 import { getYoutubeVideo } from '../common/invidious';
+import { usePromiseRTDB, useRTDB } from '../composables';
 import { useMainStore } from '../stores/main.store';
-import playerPanel from './player-panel.vue'
+import dayjs from 'dayjs';
 
 
-interface Operator {
-    name: string;
-}
-interface PlayListItem {
-    youtubeId: string;
-    operator: Operator;
-}
-interface ActionListItem {
-    method: "暫停" | "撥放" | "切歌" | "大聲" | "小聲" | '發言';
-    note?: string;
-    operator: Operator;
-    timestamp: number
-}
+
+const route = useRoute()
 
 interface Props {
-    playList: PlayListItem[];
+    preplayList: PlayListItem[];
     playedList: PlayListItem[];
     actionList?: ActionListItem[];
+    push: ReturnType<typeof useRTDB>['push']
 }
 const props = withDefaults(defineProps<Props>(), {
     // playedList: () => ([
@@ -46,25 +46,17 @@ const props = withDefaults(defineProps<Props>(), {
     // ])
 });
 
-const emit = defineEmits<{
-    (e: 'update:playList', value: Props['playList']): void;
-    (e: 'update:playedList', value: Props['playedList']): void;
-}>();
 
-const playList = computed({
-    get: () => props.playList,
-    set: (val) => emit('update:playList', val)
-})
-const playedList = computed({
-    get: () => props.playedList,
-    set: (val) => emit('update:playedList', val)
-})
-
-
-
+const playerPanelElement = ref<InstanceType<typeof playerPanel>>()
 
 const store = useMainStore();
+const serverList = ref<string[]>()
+async function init() {
+    console.log('youtube-player init');
 
+    serverList.value = await store.serverList;
+}
+init()
 
 
 /**
@@ -72,34 +64,110 @@ const store = useMainStore();
  */
 const currentYoutubeInfo = computedAsync(
     async () => {
-        const current = first(playList.value)
-        if (!current) return;
-        const serverList = await store.serverList;
-        return getYoutubeVideo(serverList, current.youtubeId)
+        const current = first(props.preplayList)
+        if (!current || !serverList.value) return;
+
+        return getYoutubeVideo(serverList.value, current.youtubeId)
     },
     null, // initial state
 )
+
+
+function handleReady() {
+    if (!currentYoutubeInfo.value || !playerPanelElement.value) return;
+    navigator.mediaSession.metadata = new MediaMetadata({
+        title: currentYoutubeInfo.value.title,
+        artist: currentYoutubeInfo.value.author,
+        album: '一起聽音樂',
+        artwork: currentYoutubeInfo.value.videoThumbnails.filter(item => ['start', 'middle', 'end'].indexOf(item.quality) === -1).map(item => ({
+            src: item.url,
+            sizes: `${item.width}x${item.height}`,
+            type: 'image/jpg'
+        })).sort((a, b) => toNumber(a.sizes.replace('x', '')) - toNumber(b.sizes.replace('x', '')))
+
+
+    });
+
+    navigator.mediaSession.setActionHandler('nexttrack', handleNext);
+    navigator.mediaSession.setActionHandler('previoustrack', handlePrev);
+    navigator.mediaSession.setActionHandler('play', playerPanelElement.value.handlePlay);
+    navigator.mediaSession.setActionHandler('pause', playerPanelElement.value.handlePause);
+}
+
+
+
 const currentYoutubeInfoIsLoading = computed(() => currentYoutubeInfo.value === null)
 
-function handleNext() {
+const currentYoutubeSources = computed(() => {
+    if (!currentYoutubeInfo.value || !serverList.value) return;
+    const result: string[] | undefined = [];
+    const iTags: string[] = ['139'];
+    const videoId = currentYoutubeInfo.value.videoId
+    currentYoutubeInfo.value.formatStreams.forEach(stream => {
+        // result.push(stream.url)
+        iTags.push(stream.itag)
+    });
+
+    iTags.forEach(tag => {
+        if (!serverList.value) return;
+        serverList.value.forEach(serverUrl => {
+            result.push(`${serverUrl}/latest_version?id=${videoId}&itag=${tag}&local=true`)
+        })
+    })
+    iTags.forEach(tag => {
+        if (!serverList.value) return;
+        serverList.value.forEach(serverUrl => {
+            result.push(`${serverUrl}/latest_version?id=${videoId}&itag=${tag}`)
+        })
+    })
+    return result
+    // `${sample(serverList)}
+})
+
+
+
+
+async function handleNext() {
     console.log('下一首');
 
-    if (!playList.value || playList.value.length <= 0) return;
-    const playedItem = playList.value.shift()
-    if (!playedItem) return;
-    playedList.value.push(playedItem)
 
-
-    if (playList.value.length <= 0) {
-        const nextItemId = get(currentYoutubeInfo.value, 'recommendedVideos[0].videoId')
+    if (props.preplayList.length <= 1) {
+        // const nextItemId = get(currentYoutubeInfo.value, 'recommendedVideos[0].videoId')
+        const nextItemId = first(currentYoutubeInfo.value?.recommendedVideos.sort((a) => a.lengthSeconds - toNumber(currentYoutubeInfo.value?.lengthSeconds)))?.videoId
         if (!nextItemId) return;
-        playList.value.push({
+        props.push({
+            'timestamp': dayjs().valueOf(),
             'youtubeId': nextItemId,
+            played: false,
             'operator': {
                 'name': '系統推薦'
-            }
+            },
         })
     }
+
+    if (!props.preplayList || props.preplayList.length <= 0) return;
+    const playedItem = first(props.preplayList)
+    if (!playedItem || !playedItem._id) return;
+    console.log('playedItem', playedItem);
+    const playListApi = await usePromiseRTDB<PlayListItem>(`${route.path}/playList/${playedItem._id}`);
+    playListApi.data.value.played = true
+
+
+
+
+}
+async function handlePrev() {
+    console.log('上一首');
+
+    if (!props.playedList || props.playedList.length <= 0) return;
+    const playedItem = first(props.playedList)
+    if (!playedItem || !playedItem._id) return;
+    console.log('playedItem', playedItem);
+    const playListApi = await usePromiseRTDB<PlayListItem>(`${route.path}/playList/${playedItem._id}`);
+    playListApi.data.value.played = false
+
+
+
 
 }
 

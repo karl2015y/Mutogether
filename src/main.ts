@@ -21,6 +21,11 @@ import './style/animate.sass';
 import './style/global.sass';
 
 
+// dayjs
+import dayjs from 'dayjs';
+import 'dayjs/locale/zh-cn' // import locale
+dayjs.locale('zh-cn') // use locale
+
 createApp(App)
   .use(Quasar, {
     plugins: {},

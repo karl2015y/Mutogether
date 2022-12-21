@@ -42,8 +42,6 @@ import { useMainStore } from './stores/main.store';
 // const todo = useRTDB<number>('todo')
 const store = useMainStore();
 
-const date = ref();
-
 const lang = ref(store.lang);
 watch(lang, (value) => store.setLang(value));
 
